@@ -9,11 +9,11 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-const newCategorySchema = joi.object({
+const categorySchema = joi.object({
     name: joi.string().min(1).required()
 });
 
-const newGameSchema = joi.object({
+const gameSchema = joi.object({
     name: joi.string().min(1).required(),
     image: joi.string().required(),
     stockTotal: joi.number().integer().min(1).required(),
@@ -21,14 +21,19 @@ const newGameSchema = joi.object({
     pricePerDay: joi.number().integer().min(1).required()
 });
 
-//const newCustomerSchema = joi.object({});
+const customerSchema = joi.object({
+    name: joi.string().min(1).required(),
+    phone: joi.string().pattern(/[0-9]{10,11}/),
+    cpf:joi.string().pattern(/[0-9]{11}/),
+    birthday: joi.date().required()
+});
 
 app.get('/categories', (req, res) => {
     connection.query('SELECT * FROM categories').then(categories => {res.send(categories.rows)})
 });
 
 app.post('/categories', (req, res) => {
-    newCategorySchema.validate(req.body).error ? res.sendStatus(400)
+    categorySchema.validate(req.body).error ? res.sendStatus(400)
     : connection.query('SELECT * FROM categories WHERE name = $1', [req.body.name]).then(produto => {
         produto.rows[0] ? res.sendStatus(409)
         : connection.query('INSERT INTO categories (name) VALUES ($1)', [req.body.name]).then(res.sendStatus(201))
@@ -54,7 +59,7 @@ app.get('/games', (req, res) => {
 });
 
 app.post('/games', (req, res) => {
-    newGameSchema.validate(req.body).error ? res.sendStatus(400)
+    gameSchema.validate(req.body).error ? res.sendStatus(400)
     : connection.query('SELECT * FROM games WHERE name = $1', [req.body.name]).then(game => {
         game.rows[0] ? res.sendStatus(409)
         : connection.query('SELECT * FROM categories WHERE id = $1', [req.body.categoryId]).then(category => {
@@ -65,5 +70,44 @@ app.post('/games', (req, res) => {
         })
     })
 });
+
+app.get('/customers', (req, res) => {
+    connection.query('SELECT * FROM customers').then(customers => {
+        let customersList = customers.rows;
+        if(req.query.cpf) {customersList = customersList.filter(customer => String(customer.cpf).startsWith(req.query.cpf))}
+        res.send(customersList);
+    })
+});
+
+app.get('/customers/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    connection.query('SELECT * FROM customers WHERE id = $1', [id]).then(customer => {
+        customer.rows[0] ? res.send(customer.rows[0]) : res.sendStatus(404);
+    })
+});
+
+app.post('/customers', (req, res) => {
+    customerSchema.validate(req.body).error ? res.sendStatus(400)
+    : connection.query('SELECT * FROM customers WHERE cpf = $1', [req.body.cpf]).then(customer => {
+        customer.rows[0] ? res.sendStatus(409)
+        : connection.query('INSERT INTO customers (name, phone, cpf, birthday) VALUES ($1, $2, $3, $4)', [req.body.name, req.body.phone, req.body.cpf, req.body.birthday]).then(res.sendStatus(201))
+    })
+});
+
+app.put('/customers/:id', (req, res) => {
+    const id = parseInt(req.params.id);
+    let cpfCheck = true;
+    customerSchema.validate(req.body).error ? res.sendStatus(400)
+    : connection.query('SELECT * FROM customers WHERE cpf = $1', [req.body.cpf]).then(customer => {
+        if(customer.rows[0]) {customer.rows.forEach(c => {if(c.id !== id) {cpfCheck = false}})}
+        if(cpfCheck === true) {
+            connection.query('SELECT * FROM customers WHERE id = $1', [id]).then(customer => {
+                if(customer.rows[0]) {
+                    connection.query('UPDATE customers SET name = $1, phone = $2, cpf = $3, birthday = $4 WHERE id = $5', [req.body.name, req.body.phone, req.body.cpf, req.body.birthday, id]).then(res.sendStatus(200))
+                } else {res.sendStatus(404)}
+            })
+        } else {res.sendStatus(409)}
+    })
+})
 
 app.listen(4000, () => {console.log('Server listening on port 4000.')});
