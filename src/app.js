@@ -35,36 +35,12 @@ const rentalSchema = joi.object({
     daysRented: joi.number().min(1).required()
 })
 
-const dates = {
-    convert:function(d) {
-        return (
-            d.constructor === Date ? d :
-            d.constructor === Array ? new Date(d[0],d[1],d[2]) :
-            d.constructor === Number ? new Date(d) :
-            d.constructor === String ? new Date(d) :
-            typeof d === "object" ? new Date(d.year,d.month,d.date) :
-            NaN
-        );
-    },
-    compare:function(a,b) {
-        return (
-            isFinite(a=this.convert(a).valueOf()) &&
-            isFinite(b=this.convert(b).valueOf()) ?
-            (a>b)-(a<b) :
-            NaN
-        );
-    },
-    inRange:function(d,start,end) {
-       return (
-            isFinite(d=this.convert(d).valueOf()) &&
-            isFinite(start=this.convert(start).valueOf()) &&
-            isFinite(end=this.convert(end).valueOf()) ?
-            start <= d && d <= end :
-            NaN
-        );
-    }
+function dateDiffInDays(a, b) {
+    const _MS_PER_DAY = 1000 * 60 * 60 * 24;
+    const utc1 = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+    const utc2 = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+    return Math.floor((utc2 - utc1) / _MS_PER_DAY);
 }
-
 
 app.get('/categories', (req, res) => {
     connection.query('SELECT * FROM categories').then(categories => {res.send(categories.rows)})
@@ -92,7 +68,7 @@ app.get('/games', async (req, res) => {
             })
             if(req.query.name) {gamesList = gamesList.filter(game => String(game.name.toLowerCase()).startsWith(req.query.name.toLowerCase()))}
             res.send(gamesList);
-        }
+        } else {res.send(gamesList)}
     });
 });
 
@@ -174,7 +150,7 @@ app.get('/rentals', async (req, res) => {
 app.post('/rentals', async (req, res) => {
     const { gameId, customerId, daysRented } = req.body;
     let originalPrice = 0;
-    const rentDate = dayjs().format('YYYY-MM-DD');
+    const rentDate = dayjs();
     if(rentalSchema.validate(req.body).error) {console.log('schema');res.sendStatus(400)} 
     else {
         const gameInfo = await connection.query('SELECT * FROM games WHERE id = $1', [gameId]);
@@ -189,14 +165,19 @@ app.post('/rentals', async (req, res) => {
 
 app.post('/rentals/:id/return', async (req, res) => {
     const id = parseInt(req.params.id);
-    const returnDate = new Date(dayjs().format('YYYY-MM-DD'));
+    const returnDateToUpdateTheDatabase = dayjs().format();
+    let returnDate = new Date();
+    returnDate = new Date(Date.UTC(returnDate.getUTCFullYear(), returnDate.getUTCMonth(), returnDate.getUTCDate()));
     const rentalInfo = await connection.query('SELECT * FROM rentals WHERE id = $1', [id]);
     if(rentalInfo.rows[0]) {
-        console.log(new Date(rentalInfo.rows[0].rentDate));
-        console.log(returnDate);
-        console.log(dates.compare(new Date(rentalInfo.rows[0].rentDate), new Date('2021-10-19')));
-        console.log(rentalInfo.rows[0].daysRented);
-        console.log(returnDate);
+        if(rentalInfo.rows[0].returnDate === null) {
+            const rentDate = new Date(Date.UTC(rentalInfo.rows[0].rentDate.getUTCFullYear(), rentalInfo.rows[0].rentDate.getUTCMonth(), rentalInfo.rows[0].rentDate.getUTCDate()));
+            const delayFee = 0;
+            if(dateDiffInDays(returnDate, rentDate) > rentalInfo.rows[0].daysRented) {
+                delayFee = (dateDiffInDays(returnDate, rentDate) - rentalInfo.rows[0].daysRented) * rentalInfo.rows[0].pricePerDay;
+            }
+            connection.query('UPDATE rentals SET "returnDate" = $1, "delayFee" = $2 WHERE id = $3', [returnDateToUpdateTheDatabase, delayFee, id]).then(res.sendStatus(200));
+        } else {console.log(returnDateToUpdateTheDatabase);res.sendStatus(400)}
     } else {res.sendStatus(404)}
 });
 
